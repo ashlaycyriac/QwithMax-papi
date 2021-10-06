@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:crypto="http://www.mulesoft.org/schema/mule/crypto"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd 
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/crypto http://www.mulesoft.org/schema/mule/crypto/current/mule-crypto.xsd">
+	<flow name="get-details-flow" doc:id="bb78f0b5-16c5-4ae5-b927-b067a05f1094" >
+		<ee:transform doc:name="save incoming data" doc:id="ac14acb7-1f50-48ef-85f9-b186b9cd7247" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="dbVar" ><![CDATA[%dw 2.0
+output application/java
+---
+{
+	"number":attributes.uriParams.number,
+	"password":attributes.queryParams.password,
+	"correlationId":correlationId,
+	"request": attributes.maskedRequestPath
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<choice doc:name="Choice" doc:id="7a0073fd-a8fe-4c3b-be2e-612fa2c83fd6" >
+			<when expression='#[attributes.maskedRequestPath contains("User")]'>
+				<crypto:jce-encrypt-pbe doc:name="Jce encrypt pbe" doc:id="5eaaa108-ff00-4f89-b9b9-c2922fe2431a" password="${secure::jce.password}" target="numberVar">
+					<crypto:content ><![CDATA[#[vars.dbVar.number]]]></crypto:content>
+				</crypto:jce-encrypt-pbe>
+				<crypto:jce-encrypt-pbe doc:name="Jce encrypt pbe" doc:id="880e8d3b-b75f-43ed-b482-60758ba9419d" password="${secure::jce.password}" target="pwVar">
+					<crypto:content ><![CDATA[#[vars.dbVar.password]]]></crypto:content>
+				</crypto:jce-encrypt-pbe>
+				<ee:transform doc:name="Convert the data into base64" doc:id="907ac33a-bc70-49f6-8a7e-0da0eba7aa3e">
+					<ee:message />
+					<ee:variables>
+						<ee:set-variable variableName="pwVar"><![CDATA[%dw 2.0
+import dw::Crypto
+import toBase64 from dw::core::Binaries
+output application/java
+---
+toBase64(vars.pwVar)]]></ee:set-variable>
+						<ee:set-variable variableName="numberVar"><![CDATA[%dw 2.0
+import dw::Crypto
+import toBase64 from dw::core::Binaries
+output application/java
+---
+toBase64(vars.numberVar)]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+				<db:select doc:name="Select the user details for the requested user for loging in" doc:id="37a9047d-90d5-44ad-b418-8841e10419ce" config-ref="Database_Config">
+					<db:sql ><![CDATA[select * from user where ContactNumber=:number and Password=:password]]></db:sql>
+					<db:input-parameters ><![CDATA[#[{
+	number:vars.numberVar ,
+	password:vars.pwVar 
+}]]]></db:input-parameters>
+				</db:select>
+				<flow-ref doc:name="Flow Reference" doc:id="b23a9285-c67b-499b-8925-b6887b2dd823" name="log-inSub_Flow"/>
+			
+</when>
+			<otherwise >
+				<db:select doc:name="Select the shop details for the requested shop for loging in" doc:id="fde947ad-bd5a-42e7-8212-4afdb33c00b2" config-ref="Database_Config">
+					<db:sql ><![CDATA[select * from shop where ShopContactNumber=:number and Password=:password]]></db:sql>
+					<db:input-parameters ><![CDATA[#[vars.dbVar]]]></db:input-parameters>
+				</db:select>
+				<flow-ref doc:name="Flow Reference" doc:id="d5c5de47-9e49-4c89-aa21-5aba6a9b92bb" name="log-inSub_Flow" />
+			
+</otherwise>
+		</choice>
+	</flow>
+	<sub-flow name="log-inSub_Flow" doc:id="b48172c7-82a3-4c1e-8766-c9ce60434b4b" >
+		<set-variable value="#[payload]" doc:name="store the data into a variable" doc:id="9a8bb47b-06e8-4c70-ae71-300d8ebc02c8" variableName="dataVar"/>
+		<choice doc:name="Choice" doc:id="3172d6a7-1243-4e7e-bb14-31e42e40c13b">
+					<when expression="#[sizeOf(payload)&gt;0]">
+				<choice doc:name="Choice" doc:id="407efbd8-15af-460b-b56d-20a3c34a6cd3" >
+					<when expression='#[vars.dbVar.request contains("User")]'>
+						<ee:transform doc:name="Send user details back" doc:id="1815909a-df3c-416c-9d80-4b2ca4b27679">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message": "loggedIn",
+	"details":  {
+      "Name":vars.dataVar[0].Name,
+        "Address": vars.dataVar[0].Address,
+        "ContactNumber": vars.dataVar[0].ContactNumber,
+  
+        "id": vars.dataVar[0].id,
+        "VaccinatedStatus": vars.dataVar[0].VaccinatedStatus,
+    }}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+					</when>
+					<otherwise >
+						<ee:transform doc:name="Send shop details back" doc:id="7e51dc60-ddd6-4b43-be9e-c16e4f97abc2" >
+							<ee:message >
+								<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message": "loggedIn",
+	"details":  {
+	"pincode": vars.dataVar[0].pincode,
+            "VaccinationRequirement": vars.dataVar[0].VaccinationRequirement,
+
+            "ShopName": vars.dataVar[0].ShopName,
+            "ShopAddress":vars.dataVar[0].ShopAddress,
+            "shopid": vars.dataVar[0].shopid,
+            "ShopContactNumber": vars.dataVar[0].ShopContactNumber
+         
+            }
+            }]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+					</otherwise>
+				</choice>
+			</when>
+			<otherwise >
+				<ee:transform doc:name="send response back" doc:id="30d4d5a3-c563-459d-9b2d-7efc7f1914cd" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message": "invalid details"
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+				</choice>
+	</sub-flow>
+	<flow name="backup" doc:id="6e2e28b4-3bc6-4429-8cf6-ae8b2c13bc8d" >
+		<db:update doc:name="Insert the token after login" doc:id="93b13b90-6487-4b0f-b5ef-a554be5f392f" config-ref="Database_Config">
+					<db:sql><![CDATA[update user 
+set token=:correlationId
+where ContactNumber=:number]]></db:sql>
+					<db:input-parameters><![CDATA[#[vars.dbVar]]]></db:input-parameters>
+				</db:update>
+		<db:update doc:name="Insert the token after login" doc:id="f4d86ee5-d485-4058-8ccf-c5870aec7633" config-ref="Database_Config">
+							<db:sql><![CDATA[update shop 
+set token=:correlationId
+where ShopContactNumber=:number]]></db:sql>
+							<db:input-parameters><![CDATA[#[vars.dbVar]]]></db:input-parameters>
+						</db:update>
+	</flow>
+</mule>

@@ -1,0 +1,770 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:email="http://www.mulesoft.org/schema/mule/email"
+	xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:crypto="http://www.mulesoft.org/schema/mule/crypto" xmlns:sqs="http://www.mulesoft.org/schema/mule/sqs" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/sqs http://www.mulesoft.org/schema/mule/sqs/current/mule-sqs.xsd
+http://www.mulesoft.org/schema/mule/crypto http://www.mulesoft.org/schema/mule/crypto/current/mule-crypto.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/email http://www.mulesoft.org/schema/mule/email/current/mule-email.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+	<flow name="create-user-flow" doc:id="03d3dc30-3ecb-41e5-8fc6-ab81cd5ccd13" >
+		<crypto:jce-encrypt-pbe doc:name="Encrypt password" doc:id="f3030c9a-ea5f-4646-a68a-f23476ef9fb5" target="pwVar" password="${secure::jce.password}">
+			<crypto:content ><![CDATA[#[payload.password]]]></crypto:content>
+		</crypto:jce-encrypt-pbe>
+		<crypto:jce-encrypt-pbe doc:name="Encrypt Username" doc:id="3535913d-93c6-48a3-8f76-30c05a78e5b2" password="${secure::jce.password}" target="numberVar">
+			<crypto:content ><![CDATA[#[payload.mobileNumber]]]></crypto:content>
+		</crypto:jce-encrypt-pbe>
+		<ee:transform doc:name="Convert the data into base64" doc:id="9c27364f-0d0c-4b9d-9434-3f1aef14cb03" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="pwVar" ><![CDATA[%dw 2.0
+import dw::Crypto
+import toBase64 from dw::core::Binaries
+output application/java
+---
+toBase64(vars.pwVar)]]></ee:set-variable>
+				<ee:set-variable variableName="numberVar" ><![CDATA[%dw 2.0
+import dw::Crypto
+import toBase64 from dw::core::Binaries
+output application/java
+---
+toBase64(vars.numberVar)]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<ee:transform doc:name="Transforming data to insert into the user table" doc:id="8cc64379-7496-4560-b9ba-13ec508e1531" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+---
+{
+	"Name":payload.name,
+	"Address":payload.address,
+	"ContactNumber":vars.numberVar,
+	"Password":vars.pwVar
+	
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<db:insert doc:name="insert the user creation data into user table" doc:id="b18ecdf2-e2fc-442b-852e-f785d97fd060" config-ref="Database_Config">
+			<db:sql><![CDATA[insert into user(Name,Address,ContactNumber,Password)
+values(:Name,:Address,:ContactNumber,:Password)]]></db:sql>
+			<db:input-parameters><![CDATA[#[payload]]]></db:input-parameters>
+		</db:insert>
+		<ee:transform doc:name="set success response" doc:id="a63c2d9f-7c9d-4c6e-90ed-a324c48bd37e">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message":"user created"
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<error-handler >
+			<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="a5fd0704-1e2c-4a0f-afdf-88d99dff24d6" type="DB:QUERY_EXECUTION" >
+				<ee:transform doc:name="set error message" doc:id="68dfbc41-e713-49ec-b860-a1ef616c0e96" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message":error.detailedDescription
+}]]></ee:set-payload>
+					</ee:message>
+					<ee:variables >
+						<ee:set-variable variableName="httpStatus" ><![CDATA[400]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</on-error-continue>
+		</error-handler>
+	</flow>
+	<flow name="create-shop-flow" doc:id="05e17789-92a4-46f6-b7e4-3473b9350162" >
+		<async doc:name="Async" doc:id="2546a47a-efab-4d7f-8c3a-8a853c32e6b4" >
+			<ee:invalidate-key doc:name="New shop created , invalidate the cache for this pincode" doc:id="ab10f188-fe64-4a8b-967e-768a63e21ae5" cachingStrategy-ref="Caching_Strategy-main" keyGenerationExpression="#[payload.pincode]" />
+		</async>
+		<ee:transform doc:name="Transforming data to insert into the shop table" doc:id="507f86d7-cff0-4f7f-b132-f9a963aa0c89" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+---
+{
+	"ShopName":payload.Name,
+	"ShopAddress":payload.address,
+	"ShopContactNumber":payload.mobileNumber,
+	"Password":payload.password,
+	"pincode":payload.pincode,
+	"VaccinationRequirement":payload.vaccineReq,
+	"url": payload.url
+	
+	
+}]]></ee:set-payload>
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="dbVar" ><![CDATA[%dw 2.0
+output application/java
+---
+{
+	"ShopName":payload.Name,
+	"ShopAddress":payload.address,
+	"ShopContactNumber":payload.mobileNumber,
+	"Password":payload.password,
+	"pincode":payload.pincode,
+	"VaccinationRequirement":payload.vaccineReq,
+	"url": payload.url
+	
+	
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<sqs:create-queue doc:name="Create a queue for the shop registered" doc:id="fbea452d-f0e3-42ed-8315-511796adac0a" config-ref="Amazon_SQS_main" queueName='#[(vars.dbVar.ShopName splitBy(" "))[0] ++ "_" ++ vars.dbVar.ShopContactNumber ++".fifo"]' >
+			<sqs:attributes ><![CDATA[#[output application/java
+---
+{
+	"ContentBasedDeduplication" : "true",
+	"FifoQueue" : "true",
+	"VisibilityTimeout" : "43100",
+	"ReceiveMessageWaitTimeSeconds" : "1"
+}]]]></sqs:attributes>
+		</sqs:create-queue>
+		<db:insert doc:name="insert the shop creation data into shop table" doc:id="e226a225-3cbe-468a-abe2-1d78b623678c" config-ref="Database_Config">
+			<db:sql><![CDATA[insert into shop(ShopName,ShopAddress,ShopContactNumber,Password,pincode,VaccinationRequirement,queueurl,image)
+values(:ShopName,:ShopAddress,:ShopContactNumber,:Password,:pincode,:VaccinationRequirement,:queueurl,:url);
+]]></db:sql>
+			<db:input-parameters><![CDATA[#[%dw 2.0
+output application/java
+---
+{
+	"ShopName":vars.dbVar.ShopName,
+	"ShopAddress":vars.dbVar.ShopAddress,
+	"ShopContactNumber":vars.dbVar.ShopContactNumber,
+	"Password":vars.dbVar.Password,
+	"pincode":vars.dbVar.pincode,
+	"VaccinationRequirement":vars.dbVar.VaccinationRequirement,
+	"queueurl":payload,
+	"url":vars.dbVar.url
+	
+	
+}]]]></db:input-parameters>
+		</db:insert>
+		<ee:transform doc:name="set success response" doc:id="a37f5441-ece0-45ea-8fb7-ef63ec2334e4" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message":"shop created"
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<error-handler >
+			<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="5675e38b-4fcb-4337-ac8e-c9ac0983a553" type="DB:QUERY_EXECUTION">
+				<ee:transform doc:name="set error message" doc:id="f25c929f-8ba3-4067-a27f-b1b15c7be54f" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message":error.detailedDescription
+}]]></ee:set-payload>
+					</ee:message>
+					<ee:variables >
+						<ee:set-variable variableName="httpStatus" ><![CDATA[400]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</on-error-continue>
+		</error-handler>
+	</flow>
+	<flow name="get-in-queue-flow" doc:id="86bbf7b8-9cad-4689-a72e-413cd56033c5" >
+		<ee:transform doc:name="store the details into payloadVar" doc:id="0f7d93b2-5400-47b8-b0c2-acdc1f9468fd" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="payloadVar" ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"personId":payload.personId,
+	"shopId":payload.shopId
+	
+	}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<db:select doc:name="check whether the user is a valid user or not" doc:id="ddae1b47-c38a-4943-abdf-2e949d06febd" config-ref="Database_Config">
+			<db:sql ><![CDATA[select id from user where id=:userid]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{"userid":vars.payloadVar.personId}]]]></db:input-parameters>
+		</db:select>
+		<choice doc:name="Check if such user exists" doc:id="331d5bc0-e6bf-4b1f-b806-59fb0dd4a4b4" >
+			<when expression="#[sizeOf(payload)&gt;0]">
+				<db:select doc:name="Check whether the user requesting is already in the queue or not" doc:id="506a36bb-1947-42da-8e1c-44581ffed521" config-ref="Database_Config">
+			<db:sql><![CDATA[select state,position,token from activity where shopid=:shopid and userid=:userid and (state="Q" or state="I") order by regTimestamp desc limit 1]]></db:sql>
+			<db:input-parameters><![CDATA[#[{
+	"shopid":vars.payloadVar.shopId,
+	"userid":vars.payloadVar.personId
+}]]]></db:input-parameters>
+		</db:select>
+				<choice doc:name="Check if the user is already in queue" doc:id="b8d8783b-0208-44dc-8545-dfe6b2d1bc30">
+			<when expression="#[sizeOf(payload)==0]">
+				<db:select doc:name="get the queueurl to publish the message" doc:id="9fd21b2a-1629-4603-8a9a-5289ee5aef7c" config-ref="Database_Config" targetValue="#[payload.queueurl]" target="queueUrl">
+					<db:sql><![CDATA[select queueurl from shop where shopid=:shopId]]></db:sql>
+					<db:input-parameters><![CDATA[#[{"shopId":vars.payloadVar.shopId
+}]]]></db:input-parameters>
+				</db:select>
+				<db:select doc:name="get the number of active users in queue" doc:id="b2428fd8-adf0-46ac-90de-7affce431682" config-ref="Database_Config" target="positionVar">
+					<db:sql><![CDATA[select count(*) as count from activity where shopid=:shopid and state="Q"]]></db:sql>
+					<db:input-parameters><![CDATA[#[{ "shopid":vars.payloadVar.shopId
+}]]]></db:input-parameters>
+				</db:select>
+				<db:insert doc:name="enter the details of the user to the activity table" doc:id="0adb0061-e8ae-4817-9dfd-ca8f0bf2ef05" config-ref="Database_Config">
+			<db:sql><![CDATA[insert into activity (shopid,userid,position,state,regTimestamp,token)
+values(:shopid,:userid,:position,:state,current_timestamp(),:correlationid)]]></db:sql>
+			<db:input-parameters><![CDATA[#[output application/java
+---
+{
+	"shopid":vars.payloadVar.shopId,
+	"userid":vars.payloadVar.personId,
+	"position":(vars.positionVar[0].count)+1,
+    "state":"Q",
+    "correlationid":correlationId
+	
+}]]]></db:input-parameters>
+		</db:insert>
+				<sqs:send-message doc:name="Send message" doc:id="807916d3-3ba6-48e1-9506-0721117c0f0e" config-ref="Amazon_SQS_main" queueUrl="#[vars.queueUrl[0]]">
+			<sqs:message><![CDATA[#[output application/java
+---
+{
+	delaySeconds: 0,
+	groupId : correlationId,
+	body: ("QueueRequest " ++ correlationId),
+	messageAttributes: {
+		"userId": {
+			"stringValue" : vars.payloadVar.personId ,
+			"dataType" : "Number"
+		} as Object {
+			class: "org.mule.extension.sqs.api.model.MessageAttributeValue"
+		},
+		"token": {
+			"stringValue" : correlationId ,
+			"dataType" : "String"
+		} as Object {
+			class: "org.mule.extension.sqs.api.model.MessageAttributeValue"
+		},
+		"shopId": {
+			"stringValue" : vars.payloadVar.shopId,
+			"dataType" : "Number"
+		} as Object {
+			class : "org.mule.extension.sqs.api.model.MessageAttributeValue"
+		}
+	} as Object {
+		class: "java.util.HashMap"
+	}
+} as Object {
+	class: "org.mule.extension.sqs.api.model.Message"
+}]]]></sqs:message>
+		</sqs:send-message>
+				<ee:transform doc:name="Transform Message" doc:id="f35d43c8-a1c6-4f99-9f3c-9079e2e4bf1b">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message":"added to queue",
+	"position": vars.positionVar[0].count + 1,
+	"token":correlationId
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</when>
+			<otherwise>
+				<ee:transform doc:name="respond back with position" doc:id="306b94e8-7280-4a27-8c85-30e15e657cc5">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message":if(payload.state[0]=="Q") "already in queue" else "already shopping" ,
+	"position": payload.position[0],
+	"token":payload.token[0]
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+		</choice>
+			</when>
+			<otherwise >
+				<ee:transform doc:name="respond back with response" doc:id="07a45acd-b6f2-45bc-8337-34f8712410d3" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message":"no such user exist"
+	
+	}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+		</choice>
+	</flow>
+	<flow name="cancel-reservation-flow" doc:id="bf0babd9-7cb9-4109-b0c0-3febb9e74a84" >
+		<ee:transform doc:name="store the details into payloadVar" doc:id="644c7b8a-e798-44fc-a247-50365e75bfb1" >
+			<ee:message />
+			<ee:variables >
+				<ee:set-variable variableName="payloadVar" ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"personId":payload.personId,
+	"shopId":payload.shopId,
+	"token":payload.token
+	
+	}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<db:select doc:name="Check the the requested details are correct or not" doc:id="27c8d646-ea74-4dda-8936-d97ea3c8460f" config-ref="Database_Config" target="dbVar">
+			<db:sql ><![CDATA[select * from activity
+WHERE userid=:personId and shopid=:shopid and state="Q" and token=:token;]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	"personId": vars.payloadVar.personId,
+	"shopid":vars.payloadVar.shopId,
+	"token":vars.payloadVar.token
+}]]]></db:input-parameters>
+		</db:select>
+		<choice doc:name="confirm the user  details are valid" doc:id="be6c5c37-1a6b-46e5-9738-12dfa6af9463" >
+			<when expression="#[sizeOf(vars.dbVar)&gt;0]">
+				<db:update doc:name='Update the reservation status to "C" which means cancelled' doc:id="60aeaf14-fc78-49fc-b76d-456ec1ee0fe4" config-ref="Database_Config">
+			<db:sql><![CDATA[UPDATE activity
+SET state = "C", position =null
+WHERE userid=:personId and shopid=:shopid and state="Q";
+
+]]></db:sql>
+			<db:input-parameters><![CDATA[#[{
+	"personId": vars.payloadVar.personId,
+	"shopid":vars.payloadVar.shopId
+
+
+	
+}]]]></db:input-parameters>
+		</db:update>
+				<db:update doc:name="Decrease the position of others by 1" doc:id="c9d1d6f3-1407-44e1-b598-20e24ff0268b" config-ref="Database_Config">
+			<db:sql><![CDATA[UPDATE activity
+SET position=position-1
+WHERE shopid=:shopid and state="Q" and position>:position;]]></db:sql>
+			<db:input-parameters><![CDATA[#[output applciation/java
+---
+{
+	"personId": vars.payloadVar.personId,
+	"shopid":vars.payloadVar.shopId,
+	"position":vars.dbVar.position[0]
+}]]]></db:input-parameters>
+		</db:update>
+				<ee:transform doc:name="set Reservation cancelled response message" doc:id="3ea1df33-ef2a-4894-90e3-00524fcf4a53" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message":"reservation cancelled"
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</when>
+			<otherwise >
+				<ee:transform doc:name="Transform Message" doc:id="e3db82d6-5a2d-4ea2-90a2-37fdf5ab056f" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message":"you are not in queue"
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+		</choice>
+	</flow>
+	<flow name="get-next-user-flow" doc:id="66201b10-71e0-4539-b977-c7e8074ddbeb" >
+		<set-variable value="#[output applciation/json&#10;---&#10;attributes.queryParams default payload]" doc:name="qpVar" doc:id="b79bf686-dec7-490d-b747-fcd2c475392b" variableName="qpVar"/>
+		<db:select doc:name="get details of the shop from database" doc:id="853dbfe0-2adc-43fa-9418-4d3f7a8d920e" config-ref="Database_Config" target="dbVar">
+			<db:sql ><![CDATA[select * from shop where shopid=:shopid]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	"shopid":vars.qpVar.shopId
+}]]]></db:input-parameters>
+		</db:select>
+		<sqs:read doc:name="Read" doc:id="36c20fc2-f30b-45cf-a94a-6220045d4203" config-ref="Amazon_SQS_main" maxNumberOfMessages="1" queueUrl='#[vars.dbVar[0].queueurl]' target="sqsVar" waitTime="1"/>
+		<choice doc:name="check if there is any message in the fifo queue to be processed" doc:id="ee98f780-3b74-4183-ad61-ba4ed60b37a2" >
+			<when expression="#[sizeOf(vars.sqsVar)&gt;0]">
+				<db:select doc:name="check whether the user is still in Q or cancelled" doc:id="fafad3e1-2149-48cb-94ad-b506fedbd3a0" config-ref="Database_Config">
+			<db:sql><![CDATA[select * from activity where shopid=:shopid and userid=:userid and state="Q" and token=:token]]></db:sql>
+			<db:input-parameters><![CDATA[#[{
+	"userid":vars.sqsVar[0].messageAttributes.userId.stringValue as Number,
+	"shopid":vars.sqsVar[0].messageAttributes.shopId.stringValue as Number,
+	"token":vars.sqsVar[0].messageAttributes.token.stringValue
+}]]]></db:input-parameters>
+		</db:select>
+				<choice doc:name="Check if the user is still in the queue" doc:id="95c8f330-84fa-4011-a5e8-7f4e9d3ac57d">
+			<when expression="#[sizeOf(payload)&gt;0]">
+						<db:select doc:name="get the user details to respond to the shop" doc:id="8fcd0495-9e1e-4a8b-9e7d-ec28677e4a71" config-ref="Database_Config" target="responseVar">
+							<db:sql ><![CDATA[select * from user where id=:userid]]></db:sql>
+							<db:input-parameters ><![CDATA[#[{
+	"userid":vars.sqsVar[0].messageAttributes.userId.stringValue as Number
+}]]]></db:input-parameters>
+						</db:select>
+						<sqs:delete-message doc:name="Delete message" doc:id="63114905-423d-49e2-b7cd-8c50994f604b" config-ref="Amazon_SQS_main" receiptHandle="#[vars.sqsVar[0].receiptHandle]" queueUrl="#[vars.dbVar[0].queueurl]" />
+						<ee:transform doc:name="Response with the details of next user" doc:id="ba4b1e6e-be09-4bd9-8fa3-60b0c86f8649" >
+							<ee:message >
+								<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+      "Name":vars.responseVar[0].Name,
+        "Address": vars.responseVar[0].Address,
+  "token":vars.sqsVar[0].messageAttributes.token.stringValue,
+        "id": vars.responseVar[0].id,
+        "VaccinatedStatus": vars.responseVar[0].VaccinatedStatus,
+    }]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+			</when>
+			<otherwise>
+				<sqs:delete-message doc:name="Delete message" doc:id="aac922b9-731e-43f7-9f9b-7a7c5fd55110" config-ref="Amazon_SQS_main" receiptHandle="#[vars.sqsVar[0].receiptHandle]" queueUrl='#[vars.dbVar[0].queueurl]' />
+				<ee:transform doc:name="setting shopId as payload" doc:id="3402f54e-005f-4e15-971c-cfbfe5e1620a">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+vars.qpVar]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+				<flow-ref doc:name="Calling the same flow to get the next user into the shop since this user cancelled the appointment" doc:id="9d7539be-05cb-4603-adf6-3285edd56600" name="get-next-user-flow" />
+			</otherwise>
+		</choice>
+			</when>
+			<otherwise >
+				<ee:transform doc:name="Set response" doc:id="77400670-628d-4c19-b56a-7259b7fac91c" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message":"no one waiting in the queue"
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+		</choice>
+	</flow>
+	<flow name="accept-user-flow" doc:id="c8d34862-18fc-4be0-a9ff-f90f03bd72e5" >
+		<set-variable value="#[payload]" doc:name="payloadVar" doc:id="93d2416f-bd71-4f48-9ebb-e710ac9bb2f0" variableName="payloadVar"/>
+		<db:select doc:name="check if the conditions are met" doc:id="553262c2-7136-480f-b818-cc85d5e08dff" config-ref="Database_Config">
+			<db:sql ><![CDATA[select * from activity where userid=:personId and shopid=:shopid and state="Q" and token=:token;]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	"personId":vars.payloadVar.personId,
+	"shopid":vars.payloadVar.shopId,
+	"token":vars.payloadVar.token
+}]]]></db:input-parameters>
+		</db:select>
+		<choice doc:name="check whether the details in request are valid or not" doc:id="e9d416dc-e202-4c50-a919-adfcb022e97c" >
+			<when expression="#[sizeOf(payload)&gt;0]">
+				<db:update doc:name="update the user status and inTime" doc:id="a631d42f-f4d2-49a0-8f5f-e11069f8b4e5" config-ref="Database_Config">
+			<db:sql><![CDATA[UPDATE activity
+SET state = "I", position =null, inTimestamp=current_timestamp()
+WHERE userid=:personId and shopid=:shopid and state="Q" and token=:token;
+
+]]></db:sql>
+			<db:input-parameters><![CDATA[#[{
+	"personId":vars.payloadVar.personId,
+	"shopid":vars.payloadVar.shopId,
+	
+	"token":vars.payloadVar.token
+}]]]></db:input-parameters>
+		</db:update>
+				<db:update doc:name="Decrease the position of others by 1" doc:id="872bde76-e6e2-44ad-b958-6001d8eae289" config-ref="Database_Config">
+			<db:sql><![CDATA[UPDATE activity
+SET position=position-1
+WHERE shopid=:shopid and state="Q"]]></db:sql>
+			<db:input-parameters><![CDATA[#[output applciation/java
+---
+{
+"shopid":vars.payloadVar.shopId
+}]]]></db:input-parameters>
+		</db:update>
+				<ee:transform doc:name="set response back" doc:id="0507ab9b-023a-4a03-b11c-950d803cdf24" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message":"person entering the shop"
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</when>
+			<otherwise >
+				<ee:transform doc:name="set response back" doc:id="29add6a5-2d11-4d21-997a-4c2f8030e757" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message":"there is no user with the given details who is currently in the queue"
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+		</choice>
+	</flow>
+	<flow name="end-session-flow" doc:id="27330cd5-9ae3-4315-8951-f00ff28604c0" >
+		<set-variable value="#[payload]" doc:name="payloadVar" doc:id="83237609-e714-4420-87b3-c6b4bab86968" variableName="payloadVar" />
+		<db:select doc:name="check if the conditions are met" doc:id="b48f5553-be58-47cd-a17d-d6251f3dc9e8" config-ref="Database_Config" >
+			<db:sql ><![CDATA[select * from activity where userid=:personId and shopid=:shopid and state="I" and token=:token;]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	"personId":vars.payloadVar.personId,
+	"shopid":vars.payloadVar.shopId,
+	"token":vars.payloadVar.token
+}]]]></db:input-parameters>
+		</db:select>
+		<choice doc:name="check whether if the user is actually in the store" doc:id="2dfe4c05-fb52-4cbc-9f99-f25fdc8e8e6c" >
+			<when expression="#[sizeOf(payload)&gt;0]" >
+				<db:update doc:name="update the user status and outTime" doc:id="1b164d08-6e81-47e1-b6c6-b9d287c3901d" config-ref="Database_Config" >
+					<db:sql ><![CDATA[UPDATE activity
+SET state = "O", outTimestamp=current_timestamp()
+WHERE userid=:personId and shopid=:shopid and state="I" and token=:token;
+
+]]></db:sql>
+					<db:input-parameters ><![CDATA[#[{
+	"personId":vars.payloadVar.personId,
+	"shopid":vars.payloadVar.shopId,
+	"token":vars.payloadVar.token
+}]]]></db:input-parameters>
+				</db:update>
+				<ee:transform doc:name="set response back" doc:id="a52c4181-aa50-4ed3-b706-b4ca0febfc95" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message":"person leaving the shop"
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</when>
+			<otherwise >
+				<ee:transform doc:name="set response back" doc:id="c9529a9f-18cf-4dc8-b443-03561ac66036" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message":"there is no user with the given details who is currently in the shop"
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+		</choice>
+	</flow>
+	<flow name="get-shops-flow" doc:id="8aa7e705-443f-471d-8d35-0211e2dce026" >
+		<db:select doc:name="Get the number of active people in quque" doc:id="bad9a6f3-9a2b-419e-b2bf-3112342c3ccf" config-ref="Database_Config" target="queueVar">
+			<db:sql ><![CDATA[select a.* from activity a,shop b where a.shopid=b.shopid and state="Q" and b.pincode=:pincode]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	"pincode":attributes.queryParams.pincode
+}]]]></db:input-parameters>
+		</db:select>
+		<ee:cache doc:name="Caching the data for this pincode" doc:id="71c67110-52a9-48ce-94a3-92e621396ccc" cachingStrategy-ref="Caching_Strategy-main">
+			<http:request method="GET" doc:name="call the pincode api to get the location details about the pincode entered" doc:id="c0ac8dd6-9758-4ade-8b4d-aa72ac5dc158" config-ref="get-pincode-data-request-config" path='#["/" ++ attributes.queryParams.pincode]' target="pincodeVar" />
+			<db:select doc:name="get details of the shops in the pincode area" doc:id="c9f71f0a-0ce1-4aa0-934c-5b7505825012" config-ref="Database_Config">
+			<db:sql><![CDATA[select * from shop where pincode=:pincode]]></db:sql>
+			<db:input-parameters><![CDATA[#[{
+	"pincode":attributes.queryParams.pincode
+}]]]></db:input-parameters>
+		</db:select>
+			<ee:transform doc:name="combine https response and db response" doc:id="0035223a-c67f-45ec-9203-e05f066ee28f" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"db": payload,
+	"http":vars.pincodeVar
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+		</ee:cache>
+		<ee:transform doc:name="send shop data back" doc:id="18742c47-cd64-4a07-9a96-d3582faa7a71">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+if(sizeOf(payload.db)>0) (payload.db map(item,index)->{
+	"pincode": item.pincode,
+            "VaccinationRequirement": item.VaccinationRequirement,
+            "imageurl":item.image,
+
+            "ShopName": item.ShopName,
+            "ShopAddress":item.ShopAddress,
+            "shopid": item.shopid,
+            "ShopContactNumber": item.ShopContactNumber,
+            "peopleInQueue":sizeOf(vars.queueVar filter ()-> $.shopid==item.shopid),
+            "location": payload.http.PostOffice[0].Name[0]
+         
+            }) else []]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="poll-flow" doc:id="d4111362-4bac-4423-bd27-a6f59ded4836" >
+		<db:select doc:name="check current state from activity table" doc:id="559d5ddb-9ddd-4066-a554-43d4124afef2" config-ref="Database_Config">
+			<db:sql ><![CDATA[select position,state from activity where shopid=:shopid and userid=:userid and token=:token]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	"shopid":attributes.queryParams.shopId,
+	"userid":attributes.queryParams.userId,
+	"token":attributes.queryParams.token
+}]]]></db:input-parameters>
+		</db:select>
+		<ee:transform doc:name="Transform Message" doc:id="b66600bf-f303-4ec6-90fa-77d9bb28b73b" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+   "position": payload[0].position,
+   "state":payload[0].state
+	
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="getActiveSpots-flow" doc:id="7c13179c-154b-46a9-8b77-10ff3b381e90" >
+		<db:select doc:name="get all active spots from activity table" doc:id="d543b5a8-18c2-4b87-824c-d5174edaba08" config-ref="Database_Config">
+			<db:sql ><![CDATA[select a.shopid,a.userid,a.position,a.token,b.shopName from activity a,shop b where a.shopid=b.shopId and a.userid=:userid and state="Q"]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	"userid": attributes.queryParams.userid
+}]]]></db:input-parameters>
+		</db:select>
+		<ee:transform doc:name="Transform Message" doc:id="ad74c813-9d2c-4de8-a5ad-6be76ab3d753" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="generate-report-flow" doc:id="6adc9404-4078-4a6e-8a46-80ad9b5bc19e" >
+		<ee:transform doc:name="save the incoming data into a variable" doc:id="e7efedbd-d882-4ba3-84be-0aa4fedcb2ca" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="emailVar" ><![CDATA[%dw 2.0
+output application/json
+---
+
+{
+	"email":attributes.queryParams.email,
+	"from":attributes.queryParams.'from',
+	"to":attributes.queryParams.'to',
+	"emailFlag":attributes.queryParams.emailFlag
+	}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<db:select doc:name="get the activity data" doc:id="bd1a01e2-e263-45f4-905f-2d17775ab87a" config-ref="Database_Config" target="activityVar">
+			<db:sql ><![CDATA[select * from activity where state="O" and regTimestamp>=:from and regTimestamp<=:to and shopid=:shopid]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	"from":attributes.queryParams.'from',
+	"to":attributes.queryParams.'to',
+	"shopid":attributes.queryParams.shopid
+}]]]></db:input-parameters>
+		</db:select>
+		<choice doc:name="Choice" doc:id="fdb5a53e-090c-4ccf-aca9-05ce9d4abfa7" >
+			<when expression="#[sizeOf(vars.activityVar)&gt;0]">
+				<ee:transform doc:name="Generate Dynamic SQL" doc:id="e226dec9-a53b-42a1-a9b3-4b9b7a76e1ba">
+			<ee:message>
+			</ee:message>
+			<ee:variables>
+				<ee:set-variable variableName="sqlVar"><![CDATA[%dw 2.0
+output application/json
+---
+"(" ++ (((vars.activityVar.userid) distinctBy ()-> $) joinBy(",")) ++ ")"]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+				<db:select doc:name="get the user data to be joined with activity data" doc:id="58ce4fc5-0609-4bb3-978a-2ccfc8b970ef" config-ref="Database_Config" target="userVar">
+			<db:sql><![CDATA[#["select * from user where id in" ++ (vars.sqlVar)]]]></db:sql>
+		</db:select>
+				<ee:transform doc:name="perform join from dw::core::Arrays  on the two data sets" doc:id="1d84222d-b64e-47a6-b914-aa011a4e15ac">
+			<ee:message>
+				<ee:set-payload><![CDATA[ %dw 2.0
+ import * from dw::core::Arrays
+ var data=(( join(vars.userVar, vars.activityVar, (user) -> user.id, (activity) -> activity.userid)) map()->
+ $.l ++ $.r)
+ output application/json
+ ---
+ data map(data,index)
+-> {
+        "Address": data.Address,
+        "Name": data.Name,
+        "VaccinatedStatus":data.VaccinatedStatus,
+        "inTimestamp": data.inTimestamp,
+        "outTimestamp":data.outTimestamp,
+        "regTimestamp": data.regTimestamp,
+        "token":data.token
+    }]]></ee:set-payload>
+			</ee:message>
+			<ee:variables>
+						<ee:set-variable variableName="emailData" ><![CDATA[ %dw 2.0
+ import * from dw::core::Arrays
+ var data=(( join(vars.userVar, vars.activityVar, (user) -> user.id, (activity) -> activity.userid)) map()->
+ $.l ++ $.r)
+ output application/xlsx
+ ---
+ {
+ 	"Visitors Report": (data map(data,index)
+-> {
+        "Address": data.Address,
+        "Name": data.Name,
+        "VaccinatedStatus":data.VaccinatedStatus,
+        "inTimestamp": data.inTimestamp,
+        "outTimestamp":data.outTimestamp,
+        "regTimestamp": data.regTimestamp,
+        "token":data.token
+    })}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+				<async doc:name="Async" doc:id="558172bd-5d26-4ce6-8697-892c0504e731" >
+					<choice doc:name="check whether the user is interested in a mail" doc:id="0ed4943b-4380-4fe8-991c-0699332e83b4">
+					<when expression='#[vars.emailVar.emailFlag=="1"]'>
+						<email:send doc:name="Send the Excel file to the user" doc:id="e5c8d071-c328-4ef9-98be-e262a4c92f01" config-ref="Email_SMTP" fromAddress="qwithmax@outlook.com" subject="Visitors Report">
+					<email:to-addresses>
+						<email:to-address value="#[vars.emailVar.email]" />
+					</email:to-addresses>
+					<email:body contentType="text/plain" encoding="UTF-8">
+						<email:content><![CDATA[#[("Attached file contains the visitors data from " ++ ((vars.emailVar.'from') replace "T" with(" ")) ++ " to " ++ ((vars.emailVar.'to') replace "T" with(" ")))]]]></email:content>
+					</email:body>
+					<email:attachments><![CDATA[#[{
+	("Visitors Report_" ++ (vars.emailVar.'from') ++ "-" ++ (vars.emailVar.'to') ++".xlsx" ): vars.emailData
+}]]]></email:attachments>
+				</email:send>
+					</when>
+					<otherwise>
+						<logger level="INFO" doc:name="mail not sent" doc:id="0ae1a9c6-7225-43ad-8d6d-d060ba44beed" message="#[vars.emailVar.emailFlag]" />
+					</otherwise>
+				</choice>
+				</async>
+			</when>
+			<otherwise >
+				<ee:transform doc:name="set response back" doc:id="9737d030-ec2e-4403-b212-3d35b76a7d2a" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"message":"no data"
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+		</choice>
+	</flow>
+	
+</mule>

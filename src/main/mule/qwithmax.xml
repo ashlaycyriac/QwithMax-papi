@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:api-gateway="http://www.mulesoft.org/schema/mule/api-gateway" xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:email="http://www.mulesoft.org/schema/mule/email" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:os="http://www.mulesoft.org/schema/mule/os" xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties" xmlns:sqs="http://www.mulesoft.org/schema/mule/sqs" xmlns:tls="http://www.mulesoft.org/schema/mule/tls" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd  http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd http://www.mulesoft.org/schema/mule/api-gateway http://www.mulesoft.org/schema/mule/api-gateway/current/mule-api-gateway.xsd http://www.mulesoft.org/schema/mule/tls http://www.mulesoft.org/schema/mule/tls/current/mule-tls.xsd http://www.mulesoft.org/schema/mule/email http://www.mulesoft.org/schema/mule/email/current/mule-email.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd http://www.mulesoft.org/schema/mule/sqs http://www.mulesoft.org/schema/mule/sqs/current/mule-sqs.xsd http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd">
+    <http:listener-config name="mule-q4u-httpListenerConfig">
+        <http:listener-connection host="0.0.0.0" port="${https.port}" protocol="HTTPS">
+            <tls:context>
+                <tls:key-store type="jks" path="keystore.jks" keyPassword="12345678" password="12345678" />
+            </tls:context>
+        </http:listener-connection>
+    </http:listener-config>
+    <apikit:config name="mule-q4u-config" api="mule-q4u.raml" outboundHeadersMapName="outboundHeaders" httpStatusVarName="httpStatus" />
+    <db:config name="Database_Config" doc:name="Database Config" doc:id="a8862969-00c4-4864-8420-ca3d229ff49d">
+        <db:my-sql-connection host="${aws.host}" port="${aws.port}" user="${aws.user}" password="${secure::aws.password}" database="${aws.db}">
+            <db:pooling-profile maxPoolSize="${db.poolsize}" minPoolSize="${db.minpool}" acquireIncrement="${db.acquire}" />
+        </db:my-sql-connection>
+    </db:config>
+    <api-gateway:autodiscovery apiId="${api.Id}" ignoreBasePath="true" doc:name="API Autodiscovery" doc:id="9aa10259-d65e-4def-95aa-0e4159a08451" flowRef="mule-q4u-main" />
+    <email:smtp-config name="Email_SMTP" doc:name="Email SMTP" doc:id="f47bb177-6b94-40c4-9465-51e8e1f029b3">
+        <email:smtp-connection host="${smtp.host}" port="${smtp.port}" user="${smtp.user}" password="${secure::smtp.pw}" connectionTimeout="30" readTimeout="30" writeTimeout="30">
+            <email:properties>
+                <email:property key="mail.smtp.starttls.enable" value="true" />
+                <email:property key="mail.smtp.ssl.trust" value="${smtp.host}" />
+            </email:properties>
+        </email:smtp-connection>
+    </email:smtp-config>
+    <ee:object-store-caching-strategy name="Caching_Strategy-main" doc:name="Caching Strategy" doc:id="416b415e-8b58-4499-bb1e-3834e5e530e6" keyGenerationExpression="#[attributes.queryParams.pincode]">
+        <os:private-object-store entryTtl="${os.ttl}" entryTtlUnit="DAYS" />
+    </ee:object-store-caching-strategy>
+    <sqs:config name="Amazon_SQS_main" doc:name="Amazon SQS Configuration" doc:id="f78a4549-ac17-4272-bb2f-4e7e6b2ce0a3">
+        <sqs:basic-connection accessKey="${secure::sqs.accesskey}" secretKey="${secure::sqs.secretkey}" />
+    </sqs:config>
+    <secure-properties:config name="Secure_Properties_Config" doc:name="Secure Properties Config" doc:id="0cbbae6c-6e4f-4f0a-a1be-2dcdc5981e56" file="common.properties" key="qwithmaxqwithmax" />
+    <configuration-properties doc:name="Configuration properties" doc:id="2f104779-7ad5-4e79-80e2-be581d150d93" file="common.properties" />
+    <http:request-config name="get-pincode-data-request-config" doc:name="HTTP Request configuration" doc:id="10eb295f-c6bf-4ac8-b802-c08c1df6f41a" basePath="${pincode.basepath}">
+        <http:request-connection host="${pincode.host}" port="${pincode.port}" protocol="HTTPS" />
+    </http:request-config>
+    <flow name="mule-q4u-main">
+        <http:listener config-ref="mule-q4u-httpListenerConfig" path="/api/*">
+            <http:response statusCode="#[vars.httpStatus default 200]">
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:response>
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body>#[payload]</http:body>
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:error-response>
+        </http:listener>
+        <apikit:router config-ref="mule-q4u-config" />
+        <error-handler>
+            <on-error-propagate type="APIKIT:BAD_REQUEST">
+                <ee:transform xsi:schemaLocation="http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Bad request"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">400</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:NOT_FOUND">
+                <ee:transform xsi:schemaLocation="http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Resource not found"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">404</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:METHOD_NOT_ALLOWED">
+                <ee:transform xsi:schemaLocation="http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Method not allowed"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">405</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:NOT_ACCEPTABLE">
+                <ee:transform xsi:schemaLocation="http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Not acceptable"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">406</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:UNSUPPORTED_MEDIA_TYPE">
+                <ee:transform xsi:schemaLocation="http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Unsupported media type"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">415</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:NOT_IMPLEMENTED">
+                <ee:transform xsi:schemaLocation="http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Not Implemented"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">501</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+        </error-handler>
+    </flow>
+    <flow name="mule-q4u-console">
+        <http:listener config-ref="mule-q4u-httpListenerConfig" path="/console/*">
+            <http:response statusCode="#[vars.httpStatus default 200]">
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:response>
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body>#[payload]</http:body>
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:error-response>
+        </http:listener>
+        <apikit:console config-ref="mule-q4u-config" />
+        <error-handler>
+            <on-error-propagate type="APIKIT:NOT_FOUND">
+                <ee:transform xsi:schemaLocation="http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Resource not found"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">404</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+        </error-handler>
+    </flow>
+    <flow name="put:\acceptUser:application\json:mule-q4u-config">
+        <flow-ref doc:name="accept-user-flow" doc:id="19694a57-6618-4abb-9757-01b03cb3b963" name="accept-user-flow" />
+    </flow>
+    <flow name="put:\endSession:application\json:mule-q4u-config">
+        <flow-ref doc:name="end-session-flow" doc:id="5947de48-d879-46b1-a54e-5deaa7d9efe2" name="end-session-flow" />
+    </flow>
+    <flow name="delete:\queue:application\json:mule-q4u-config">
+        <flow-ref doc:name="cancel-reservation-flow" doc:id="7262ddb0-2071-4203-9bd2-2766cd27167c" name="cancel-reservation-flow" />
+    </flow>
+    <flow name="get:\Shop:mule-q4u-config">
+        <flow-ref doc:name="get-shops-flow" doc:id="74cc1213-4002-4864-829c-e4560b0aecbe" name="get-shops-flow" />
+    </flow>
+    <flow name="get:\queue:mule-q4u-config">
+        <flow-ref doc:name="get-next-user-flow" doc:id="cdf5186c-9455-481c-829d-721180761f18" name="get-next-user-flow" />
+    </flow>
+    <flow name="get:\Shop\(number):mule-q4u-config">
+        <flow-ref doc:name="get-details-flow" doc:id="baf2b079-a424-4f83-94a8-61e11727edef" name="get-details-flow" />
+    </flow>
+    <flow name="get:\User\(number):mule-q4u-config">
+        <flow-ref doc:name="get-details-flow" doc:id="c2c96500-1cb8-419b-aaae-df0f58ee0b18" name="get-details-flow" />
+    </flow>
+    <flow name="post:\Shop:application\json:mule-q4u-config">
+        <flow-ref doc:name="create-shop-flow" doc:id="463a79dd-cedc-45df-bf56-06dedeb4b25d" name="create-shop-flow" />
+    </flow>
+    <flow name="post:\User:application\json:mule-q4u-config">
+        <flow-ref doc:name="create-user-flow" doc:id="13c063a1-8197-411f-9ef4-062fbd4b7f0a" name="create-user-flow" />
+    </flow>
+    <flow name="post:\queue:application\json:mule-q4u-config">
+        <flow-ref doc:name="get-in-queue-flow" doc:id="c27c12b1-0301-4153-be6d-61f5d94c3b62" name="get-in-queue-flow" />
+    </flow>
+    <flow name="get:\getPosition:mule-q4u-config">
+        <flow-ref doc:name="poll-flow" doc:id="f34b9d6b-7902-47f5-98c6-003f727f9248" name="poll-flow" />
+    </flow>
+    <flow name="get:\getReport:mule-q4u-config">
+        <flow-ref doc:name="generate-report-flow" doc:id="684558bf-ff43-4144-a6a2-603529adafde" name="generate-report-flow" />
+    </flow>
+    <flow name="get:\getActiveSpots:mule-q4u-config">
+		<flow-ref doc:name="get active reservations" doc:id="4bf99f53-64a2-4752-a021-36e46484da91" name="getActiveSpots-flow"/>
+    </flow>
+</mule>

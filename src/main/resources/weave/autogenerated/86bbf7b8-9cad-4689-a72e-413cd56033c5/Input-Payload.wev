@@ -1,0 +1,8 @@
+%dw 2.0
+
+type auto_86bbf7b8_9cad_4689_a72e_413cd56033c5_Input_Payload = {
+  personId: Number, 
+  shopId: Number, 
+  _?: Any
+}
+
